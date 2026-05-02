@@ -24,13 +24,13 @@ function AppContent() {
     return (
       <div className="min-h-screen bg-[#0a0f1a] flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
-          <Loader2 className="w-12 h-12 text-cyan-500 animate-spin" />
-          <p className="text-cyan-400 text-lg font-medium animate-pulse">Validating session...</p>
+          <Loader2 className="w-12 h-12 text-red-600 animate-spin" />
+          <p className="text-red-500 text-lg font-medium animate-pulse">🔴 HOMELANDER Loading...</p>
           {showDebug && (
             <div className="mt-4 p-4 bg-white/5 rounded-lg text-xs text-gray-400 font-mono">
-              <p>Session Token: {sessionToken ? sessionToken.substring(0, 20) + '...' : 'None'}</p>
+              <p>Token: {sessionToken ? sessionToken.substring(0, 20) + '...' : 'None'}</p>
               <p>Validating: {isValidating ? 'Yes' : 'No'}</p>
-              <p>Session Valid: {sessionValid ? 'Yes' : 'No'}</p>
+              <p>Valid: {sessionValid ? 'Yes' : 'No'}</p>
             </div>
           )}
         </div>
@@ -44,7 +44,7 @@ function AppContent() {
       <div className="relative">
         <RestrictedPage />
         {showDebug && (
-          <div className="fixed bottom-4 right-4 p-4 bg-red-500/20 border border-red-500/50 rounded-lg text-xs text-red-400 font-mono">
+          <div className="fixed bottom-4 right-4 p-4 bg-red-600/20 border border-red-600/50 rounded-lg text-xs text-red-400 font-mono">
             <p>Debug: No valid session</p>
             <p>Token: {sessionToken ? 'Present' : 'Missing'}</p>
             <p>Valid: {sessionValid ? 'Yes' : 'No'}</p>
@@ -69,7 +69,7 @@ function App() {
             toastOptions={{
               style: {
                 background: '#1a1f2e',
-                border: '1px solid rgba(6, 182, 212, 0.3)',
+                border: '1px solid rgba(220, 20, 60, 0.5)',
                 color: '#fff',
               },
             }}
