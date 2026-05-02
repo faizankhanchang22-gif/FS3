@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-TOJI Telegram Bot - Advanced Session Management & User Registration
-Bot: @TOJIchk_bot
-Token: 8543073349:AAE4g6AcLSgBTEz5b3sXaBJlDIhZnQopVE0
+Homelander Telegram Bot - Premium Checker Platform
+Bot owner: 8606381959
 """
 
 import asyncio
@@ -46,9 +45,10 @@ def create_session_token(user_id: int, username: str) -> str:
     return f"{header}.{payload_b64}.{signature}"
 
 # Bot Configuration
-BOT_TOKEN = "8543073349:AAE4g6AcLSgBTEz5b3sXaBJlDIhZnQopVE0"
+BOT_TOKEN = "8627502122:AAGUonCxXmMuep2J7GHDUAOxO-RCazNpMi8"
+OWNER_ID = 8606381959
 WEBAPP_URL = "http://localhost:5173"  # Local development URL
-SESSION_DURATION = 30 * 60  # 30 minutes in seconds
+SESSION_DURATION = 30 * 60  # Legacy duration; session flow is disabled
 
 # Data Storage - Use absolute path to shared directory
 import os
@@ -56,6 +56,8 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.dirname(SCRIPT_DIR)  # Parent directory (toji-project)
 USERS_FILE = os.path.join(DATA_DIR, "users.json")
 SESSIONS_FILE = os.path.join(DATA_DIR, "sessions.json")
+REDEEM_CODES_FILE = os.path.join(DATA_DIR, "redeem_codes.json")
+VERIFIED_USERS_FILE = os.path.join(DATA_DIR, "verified_users.json")
 
 # Path logs disabled to prevent encoding errors on Windows
 # print(f"Data directory: {DATA_DIR}")
@@ -93,6 +95,43 @@ class DataManager:
             json.dump(sessions, f, indent=2)
     
     @staticmethod
+    def load_redeem_codes() -> Dict:
+        try:
+            with open(REDEEM_CODES_FILE, 'r') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return {}
+    
+    @staticmethod
+    def save_redeem_codes(codes: Dict):
+        with open(REDEEM_CODES_FILE, 'w') as f:
+            json.dump(codes, f, indent=2)
+
+    @staticmethod
+    def load_verified_users() -> Dict:
+        try:
+            with open(VERIFIED_USERS_FILE, 'r') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return {}
+
+    @staticmethod
+    def save_verified_users(verified_users: Dict):
+        with open(VERIFIED_USERS_FILE, 'w') as f:
+            json.dump(verified_users, f, indent=2)
+
+    @staticmethod
+    def is_user_verified(user_id: int) -> bool:
+        verified = DataManager.load_verified_users()
+        return bool(verified.get(str(user_id), False))
+
+    @staticmethod
+    def mark_user_verified(user_id: int):
+        verified = DataManager.load_verified_users()
+        verified[str(user_id)] = True
+        DataManager.save_verified_users(verified)
+
+    @staticmethod
     def generate_session_token(user_id: int = 0, username: str = "") -> str:
         """Generate a session token - now uses JWT-like format"""
         return create_session_token(user_id, username)
@@ -107,14 +146,77 @@ class DataManager:
         return datetime.now() < expiry
 
 
+# OTP and verification persistence
+class OTPManager:
+    """Manage per-user OTP generation, expiry, and attempt limits."""
+    OTPS: Dict[int, Dict] = {}
+    MAX_ATTEMPTS = 3
+    EXPIRY_SECONDS = 120
+
+    @classmethod
+    def generate_otp(cls, user_id: int, uid: str) -> str:
+        otp = f"{secrets.randbelow(1000000):06d}"
+        expires_at = datetime.now() + timedelta(seconds=cls.EXPIRY_SECONDS)
+        cls.OTPS[user_id] = {
+            "otp": otp,
+            "expires_at": expires_at,
+            "attempts": 0,
+            "uid": uid
+        }
+        return otp
+
+    @classmethod
+    def get_entry(cls, user_id: int) -> Optional[Dict]:
+        entry = cls.OTPS.get(user_id)
+        if not entry:
+            return None
+        if datetime.now() > entry["expires_at"]:
+            cls.delete_otp(user_id)
+            return None
+        return entry
+
+    @classmethod
+    def verify_otp(cls, user_id: int, otp: str) -> bool:
+        entry = cls.get_entry(user_id)
+        if not entry:
+            return False
+
+        if entry["otp"] != otp:
+            entry["attempts"] += 1
+            if entry["attempts"] >= cls.MAX_ATTEMPTS:
+                cls.delete_otp(user_id)
+            else:
+                cls.OTPS[user_id] = entry
+            return False
+
+        cls.delete_otp(user_id)
+        return True
+
+    @classmethod
+    def delete_otp(cls, user_id: int):
+        cls.OTPS.pop(user_id, None)
+
+
 # Initialize data files
-for file in [USERS_FILE, SESSIONS_FILE]:
+for file, default_value in [
+    (USERS_FILE, {}),
+    (SESSIONS_FILE, {}),
+    (REDEEM_CODES_FILE, {
+        "HOMELANDER-TRIAL": {
+            "status": "available",
+            "value": 5,
+            "used_by": None,
+            "used_at": None
+        }
+    }),
+    (VERIFIED_USERS_FILE, {})
+]:
     try:
         with open(file, 'r') as f:
             pass
     except FileNotFoundError:
         with open(file, 'w') as f:
-            json.dump({}, f)
+            json.dump(default_value, f, indent=2)
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -126,24 +228,23 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(user.id) not in users:
         # Show registration message
         welcome_text = f"""
-🌟 <b>Welcome to TOJI Checker Platform!</b> 🌟
+🌟 <b>Welcome to Homelander Checker Platform!</b> 🌟
 
 👤 <b>User:</b> {user.first_name}
 🆔 <b>ID:</b> <code>{user.id}</code>
 
 ⚠️ <b>You are not registered yet!</b>
 
-Click the button below to register and access the TOJI WebApp.
+Register now to use the Homelander web and Telegram checker.
 
 📌 <b>Features:</b>
-• Advanced CC Checkers
-• Account Checkers (Steam, Crunchyroll, Hotmail)
-• SK Key Validator
-• PayPal & Stripe Tools
-• Real-time Results
-• 30-Minute Sessions
+• Single plan: $5/week
+• CC & account checkers
+• SK key validation
+• PayPal, Stripe, Shopify tools
+• Telegram channel alerts
 
-<i>🔒 Secure • ⚡ Fast • 🎯 Reliable</i>
+<i>🔒 Premium • ⚡ Fast • 🎯 The Boys style</i>
 """
         keyboard = [[InlineKeyboardButton("📝 REGISTER NOW", callback_data="register")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -154,20 +255,22 @@ Click the button below to register and access the TOJI WebApp.
             reply_markup=reply_markup
         )
     else:
-        # User is registered, show session options
+        # User is registered, show web and redeem options
         user_data = users[str(user.id)]
         welcome_back = f"""
-🎉 <b>Welcome back to TOJI, {user.first_name}!</b> 🎉
+🎉 <b>Welcome back to Homelander, {user.first_name}!</b> 🎉
 
 ✅ <b>You are registered!</b>
 📅 <b>Registered:</b> {user_data.get('registered_at', 'N/A')}
 
-Choose an option below:
+Single plan: <b>$5 / week</b>
+Use the web app or redeem a code below.
 """
         keyboard = [
-            [InlineKeyboardButton("🔑 CREATE SESSION", callback_data="create_session")],
+            [InlineKeyboardButton("🌐 OPEN WEB APP", callback_data="create_session")],
+            [InlineKeyboardButton("🧾 REDEEM CODE", callback_data="redeem_help")],
             [InlineKeyboardButton("📊 MY STATS", callback_data="my_stats")],
-            [InlineKeyboardButton("💬 SUPPORT", url="https://t.me/TOJISupport")]
+            [InlineKeyboardButton("💬 SUPPORT", url="https://t.me/homelanderhits")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -202,18 +305,19 @@ async def register_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     success_text = f"""
 ✅ <b>Registration Successful!</b> ✅
 
-🎊 <b>Welcome to TOJI, {user.first_name}!</b>
+🎊 <b>Welcome to Homelander, {user.first_name}!</b>
 
 Your account has been created with:
 🆔 <b>User ID:</b> <code>{user.id}</code>
 👤 <b>Username:</b> @{user.username or 'N/A'}
 
-🚀 <b>Next Step:</b> Create a session to access the WebApp!
+🚀 <b>Next Step:</b> Open the Homelander WebApp or redeem a code.
 
-<i>Sessions expire after 30 minutes of inactivity.</i>
+💰 <b>Single Plan:</b> $5 / week
 """
     keyboard = [
-        [InlineKeyboardButton("🔑 CREATE SESSION", callback_data="create_session")],
+        [InlineKeyboardButton("🌐 OPEN WEB APP", callback_data="create_session")],
+        [InlineKeyboardButton("🧾 REDEEM CODE", callback_data="redeem_help")],
         [InlineKeyboardButton("🔙 Back to Start", callback_data="start_again")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -226,61 +330,37 @@ Your account has been created with:
 
 
 async def create_session_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle session creation"""
+    """Handle opening the web app"""
     query = update.callback_query
     await query.answer()
     
     user = update.effective_user
     users = DataManager.load_users()
-    sessions = DataManager.load_sessions()
     
-    # Check if user is registered
     if str(user.id) not in users:
         await query.edit_message_text(
             "⚠️ Please register first! Use /start",
             parse_mode=ParseMode.HTML
         )
         return
-    
-    # Generate new session with user info
-    session_token = DataManager.generate_session_token(user.id, user.username or "N/A")
-    expires_at = datetime.now() + timedelta(seconds=SESSION_DURATION)
-    
-    # Save session
-    sessions[session_token] = {
-        "user_id": user.id,
-        "username": user.username or "N/A",
-        "created_at": datetime.now().isoformat(),
-        "expires_at": expires_at.isoformat(),
-        "active": True
-    }
-    DataManager.save_sessions(sessions)
-    
-    print(f"Session created for user {user.id}: {session_token[:30]}...")
-    
-    # Create WebApp URL with session
-    webapp_url = f"{WEBAPP_URL}?session={session_token}"
-    
+
+    webapp_url = WEBAPP_URL
     
     session_text = f"""
-🔐 <b>Session Created Successfully!</b> 🔐
+🌐 <b>Homelander WebApp is ready!</b> 🌐
 
-⏱ <b>Duration:</b> 30 Minutes
-⏳ <b>Expires:</b> {expires_at.strftime('%H:%M:%S')}
+Visit the link below to open the checker dashboard.
 
-🔑 <b>Your Session Token:</b>
-<code>{session_token}</code>
+📱 <b>WebApp URL:</b>
+<code>{webapp_url}</code>
 
-📱 <b>To Access Web App:</b>
-1. Open your browser (Chrome/Firefox)
-2. Go to: <code>http://localhost:5173</code>
-3. Paste this URL with your token:
-<code>http://localhost:5173?session={session_token}</code>
+💰 <b>Single Plan:</b> $5 / week
 
-⚠️ <b>Note:</b> Session expires in 30 minutes.
+🧾 To redeem a code, send /redeem CODE
 """
     keyboard = [
-        [InlineKeyboardButton("♻️ NEW SESSION", callback_data="create_session")],
+        [InlineKeyboardButton("🌐 OPEN WEB APP", url=webapp_url)],
+        [InlineKeyboardButton("🧾 REDEEM CODE", callback_data="redeem_help")],
         [InlineKeyboardButton("📊 MY STATS", callback_data="my_stats")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -292,12 +372,28 @@ async def create_session_callback(update: Update, context: ContextTypes.DEFAULT_
     )
 
 
+async def redeem_help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(
+        "To redeem a Homelander access code, use /redeem CODE. Example: /redeem HOMELANDER-TRIAL",
+        parse_mode=ParseMode.HTML
+    )
+
+
 async def my_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show user stats"""
     query = update.callback_query
     await query.answer()
     
     user = update.effective_user
+    if not DataManager.is_user_verified(user.id):
+        await query.edit_message_text(
+            "⚠️ Please verify using /login",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
     users = DataManager.load_users()
     
     if str(user.id) not in users:
@@ -310,7 +406,7 @@ async def my_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data = users[str(user.id)]
     
     stats_text = f"""
-📊 <b>Your TOJI Statistics</b> 📊
+📊 <b>Your Homelander Statistics</b> 📊
 
 👤 <b>User:</b> {user_data.get('first_name', 'N/A')}
 🆔 <b>ID:</b> <code>{user_data.get('user_id', 'N/A')}</code>
@@ -326,7 +422,7 @@ async def my_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 <i>Keep checking to increase your stats!</i>
 """
     keyboard = [
-        [InlineKeyboardButton("🔑 CREATE SESSION", callback_data="create_session")],
+        [InlineKeyboardButton("🌐 OPEN WEB APP", callback_data="create_session")],
         [InlineKeyboardButton("🔙 Back", callback_data="start_again")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -350,74 +446,213 @@ async def start_again_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command"""
     help_text = f"""
-📖 <b>TOJI Bot Commands</b> 📖
+📖 <b>Homelander Bot Commands</b> 📖
 
 /start - Start the bot / View main menu
 /help - Show this help message
-/status - Check your session status
+/login UID - Request a verification code
+/verify OTP - Verify your login code
+/redeem CODE - Redeem your access code
+/status - Show your plan status
 /stats - View your statistics
 
 🔹 <b>How to use:</b>
 1. Send /start to register
-2. Click "CREATE SESSION"
-3. Click "OPEN WEB APP"
-4. Start checking!
+2. Use /login <UID> to receive a secure OTP
+3. Verify with /verify <OTP>
+4. Open the Homelander WebApp
+5. Start checking
+6. Get hit alerts in @homelanderhits
 
-🔹 <b>Session Info:</b>
-• Sessions last 30 minutes
-• Auto-expire after inactivity
-• Create new session anytime
+🔹 <b>Single Plan:</b> $5 / week
 
 🔹 <b>Need Help?</b>
-Contact: @TOJISupport
+Contact: @homelanderhits
 """
     await update.message.reply_text(help_text, parse_mode=ParseMode.HTML)
 
 
-async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Check session status"""
+async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start OTP login with /login <UID>"""
     user = update.effective_user
-    sessions = DataManager.load_sessions()
-    
-    # Find active session for user
-    active_session = None
-    for token, session in sessions.items():
-        if session.get("user_id") == user.id and DataManager.is_session_valid(token):
-            active_session = (token, session)
-            break
-    
-    if active_session:
-        token, session = active_session
-        expires = datetime.fromisoformat(session['expires_at'])
-        remaining = expires - datetime.now()
-        minutes = int(remaining.total_seconds() // 60)
-        seconds = int(remaining.total_seconds() % 60)
-        
-        status_text = f"""
-✅ <b>Active Session Found!</b>
+    args = context.args
 
-⏱ <b>Time Remaining:</b> {minutes}m {seconds}s
-⏳ <b>Expires At:</b> {expires.strftime('%H:%M:%S')}
+    if not args:
+        await update.message.reply_text(
+            "Usage: /login <UID>\nExample: /login HOMELANDER123",
+            parse_mode=ParseMode.HTML
+        )
+        return
 
-🔑 <b>Session Token:</b>
-<code>{token[:20]}...</code>
+    uid = args[0].strip()
+    if not uid:
+        await update.message.reply_text(
+            "Please provide a valid UID.",
+            parse_mode=ParseMode.HTML
+        )
+        return
 
-<a href="{WEBAPP_URL}?session={token}">🌐 Open WebApp</a>
-"""
+    otp_code = OTPManager.generate_otp(user.id, uid)
+    await update.message.reply_text(
+        f"🔐 Your Homelander verification code is: <code>{otp_code}</code>\n\nThis code expires in 2 minutes. Use /verify <OTP> to complete verification.",
+        parse_mode=ParseMode.HTML
+    )
+
+
+async def verify_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Verify the OTP with /verify <OTP>"""
+    user = update.effective_user
+    args = context.args
+
+    if not args:
+        await update.message.reply_text(
+            "Usage: /verify <OTP>",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    otp = args[0].strip()
+    if not otp:
+        await update.message.reply_text(
+            "Please provide the OTP you received.",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    entry = OTPManager.get_entry(user.id)
+    if not entry:
+        await update.message.reply_text(
+            "❌ Invalid OTP.",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    if OTPManager.verify_otp(user.id, otp):
+        DataManager.mark_user_verified(user.id)
+        await update.message.reply_text(
+            "✅ Verified successfully",
+            parse_mode=ParseMode.HTML
+        )
     else:
-        status_text = """
-❌ <b>No Active Session</b>
+        attempts_left = OTPManager.MAX_ATTEMPTS - (entry.get("attempts", 0) if entry else 0)
+        if attempts_left <= 0:
+            await update.message.reply_text(
+                "❌ Invalid OTP. Maximum attempts reached. Request a new code with /login <UID>",
+                parse_mode=ParseMode.HTML
+            )
+        else:
+            await update.message.reply_text(
+                "❌ Invalid OTP",
+                parse_mode=ParseMode.HTML
+            )
 
-You don't have an active session.
-Use /start to create a new session.
-"""
+
+async def redeem_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Redeem a Homelander code"""
+    user = update.effective_user
+    if not DataManager.is_user_verified(user.id):
+        await update.message.reply_text(
+            "⚠️ Please verify using /login",
+            parse_mode=ParseMode.HTML
+        )
+        return
+    user = update.effective_user
+    users = DataManager.load_users()
+
+    if str(user.id) not in users:
+        await update.message.reply_text(
+            "⚠️ You are not registered yet. Send /start to register.",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "Please send a code with /redeem CODE",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    code = args[0].strip().upper()
+    redeem_codes = DataManager.load_redeem_codes()
+    entry = redeem_codes.get(code)
+
+    if not entry or entry.get("status") != "available":
+        await update.message.reply_text(
+            "❌ Invalid or already used code.",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    entry["status"] = "used"
+    entry["used_by"] = str(user.id)
+    entry["used_at"] = datetime.now().isoformat()
+    redeem_codes[code] = entry
+    DataManager.save_redeem_codes(redeem_codes)
+
+    user_data = users[str(user.id)]
+    user_data["premium"] = True
+    user_data["premium_expires_at"] = (datetime.now() + timedelta(days=7)).isoformat()
+    users[str(user.id)] = user_data
+    DataManager.save_users(users)
+
+    await update.message.reply_text(
+        f"✅ Code redeemed successfully! Homelander premium is active for 7 days.\nCode: {code}",
+        parse_mode=ParseMode.HTML
+    )
+
+
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Check plan status"""
+    user = update.effective_user
+    if not DataManager.is_user_verified(user.id):
+        await update.message.reply_text(
+            "⚠️ Please verify using /login",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    users = DataManager.load_users()
     
+    if str(user.id) not in users:
+        await update.message.reply_text(
+            "⚠️ You are not registered yet. Send /start to register.",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    user_data = users[str(user.id)]
+    expires_at = user_data.get("premium_expires_at")
+    premium_active = user_data.get("premium", False)
+
+    status_text = f"""
+📌 <b>Homelander Plan Status</b> 📌
+
+👤 <b>User:</b> {user.first_name}
+🆔 <b>ID:</b> <code>{user.id}</code>
+
+💰 <b>Plan:</b> $5 / week
+• <b>Premium Active:</b> {'✅ Yes' if premium_active else '❌ No'}
+"""
+    if expires_at:
+        status_text += f"\n• <b>Expires:</b> {expires_at}"
+
+    status_text += f"\n\n🌐 Open the Homelander WebApp: <code>{WEBAPP_URL}</code>"
+
     await update.message.reply_text(status_text, parse_mode=ParseMode.HTML)
 
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show stats command"""
     user = update.effective_user
+    if not DataManager.is_user_verified(user.id):
+        await update.message.reply_text(
+            "⚠️ Please verify using /login",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
     users = DataManager.load_users()
     
     if str(user.id) not in users:
@@ -444,7 +679,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     """Start the bot"""
-    print("Starting TOJI Telegram Bot...")
+    print("Starting Homelander Telegram Bot...")
     print(f"Bot Token: {BOT_TOKEN[:20]}...")
     
     # Create application
@@ -453,12 +688,16 @@ def main():
     # Add handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("login", login_command))
+    application.add_handler(CommandHandler("verify", verify_command))
+    application.add_handler(CommandHandler("redeem", redeem_command))
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("stats", stats_command))
     
     # Callback handlers
     application.add_handler(CallbackQueryHandler(register_callback, pattern="^register$"))
     application.add_handler(CallbackQueryHandler(create_session_callback, pattern="^create_session$"))
+    application.add_handler(CallbackQueryHandler(redeem_help_callback, pattern="^redeem_help$"))
     application.add_handler(CallbackQueryHandler(my_stats_callback, pattern="^my_stats$"))
     application.add_handler(CallbackQueryHandler(start_again_callback, pattern="^start_again$"))
     
