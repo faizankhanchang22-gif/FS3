@@ -37,7 +37,21 @@ import uvicorn
 # ============== HOMELANDER BOT CONFIG ==============
 BOT_VERSION = "2.0"
 BOT_NAME = "HOMELANDER"
-BOT_TOKEN = "8543073349:AAE4g6AcLSgBTEz5b3sXaBJlDIhZnQopVE0"
+
+# Load token from environment (REQUIRED)
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    print("\n" + "="*60)
+    print("❌ BOT TOKEN NOT CONFIGURED")
+    print("="*60)
+    print("\nPlease set the BOT_TOKEN environment variable:")
+    print("  1. Create .env file in project root")
+    print("  2. Add: BOT_TOKEN=your_telegram_bot_token")
+    print("  3. Run backend again")
+    print("\nSee .env.example for template")
+    print("="*60 + "\n")
+    sys.exit(1)
+
 OWNER_ID = 8606381959
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 GROUP_CHAT_ID = "-1003700444046"  # Logs/hits channel
